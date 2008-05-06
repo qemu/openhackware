@@ -49,7 +49,7 @@ SECTIONS
         _sdata_end = . ;
         . = ALIGN(4) ;
         _ro_start = . ;
-        .rodata    : { *(.rodata) } > bios
+        .rodata    : { *(.rodata*) } > bios
         _ro_end = . ;
         . = ALIGN(4) ;
         _RTAS_start = .;
