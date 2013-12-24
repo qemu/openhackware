@@ -53,7 +53,7 @@ CFLAGS+= -I$(SRCDIR)/dev -I$(SRCDIR)/dev/block -I$(SRCDIR)/dev/char
 CFLAGS+= -I$(SRCDIR)/dev/bus
 LDFLAGS= -O2 -g -nostdlib
 
-BIOS_IMAGE_BITS:= 19
+BIOS_IMAGE_BITS:= 20
 BIOS_IMAGE_SIZE:= $(shell echo $$(( 1 << $(BIOS_IMAGE_BITS) )) )
 
 BOOT_SIZE      := 0x00000200
