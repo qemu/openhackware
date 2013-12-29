@@ -22,8 +22,8 @@
 #DEBUG=1
 
 CROSS_COMPILE?=powerpc-linux-
-CC:= $(CROSS_COMPILE)gcc
-LD:= $(CROSS_COMPILE)ld
+CC:= $(CROSS_COMPILE)gcc -m32
+LD:= $(CROSS_COMPILE)ld -m elf32ppc
 OBJCOPY:= $(CROSS_COMPILE)objcopy
 MKDIR:= mkdir
 CAT:= cat
