@@ -363,7 +363,7 @@ int main (void)
     void *boot_image, *cmdline, *ramdisk;
     void *load_base, *load_entry, *last_alloc, *load_end;
     uint32_t memsize, boot_image_size, cmdline_size, ramdisk_size;
-    uint32_t boot_base, boot_nb;
+    uint32_t boot_nb;
     int boot_device, i;
     static const uint32_t isa_base_tab[3] = {
         0x80000000, /* PREP */
@@ -467,7 +467,6 @@ int main (void)
     mem_align(0x00001000);
     res = malloc(0x4000);
     last_alloc = malloc(0);
-    boot_base = 0;
     boot_nb = 0;
     DPRINTF("Load base: %p - residual data: %p %p %p %p\n",
             load_base, res, last_alloc, boot_part, part_fs(boot_part));

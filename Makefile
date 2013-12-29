@@ -45,6 +45,8 @@ SRCDIR:= src
 
 CC_BASE:= $(shell $(CC) -print-search-dirs | grep install | sed -e 's/.*\ //')
 CFLAGS= -Wall -W -Werror -O2 -g -fno-builtin -fno-common -nostdinc -mregnames
+# Disable a few warnings that would just create needless code churn
+CFLAGS+= -Wno-pointer-sign -Wno-unused-but-set-variable
 CFLAGS+= -DBUILD_DATE=$(BUILD_DATE) -DBUILD_TIME=$(BUILD_TIME)
 CFLAGS+= -I$(SRCDIR)/ -I$(SRCDIR)/libc/include -I$(CC_BASE)/include
 CFLAGS+= -I$(SRCDIR)/dev -I$(SRCDIR)/dev/block -I$(SRCDIR)/dev/char

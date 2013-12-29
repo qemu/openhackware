@@ -131,6 +131,7 @@ typedef enum load_cmd_t {
     LC_LOAD_DYLINKER  = 0x0E,
     LC_ID_DYLINKER    = 0x0F,
     LC_PREBOUND_DYLIB = 0x10,
+    LC_0x17           = 0x17,
 } load_cmd_t;
 
 typedef struct mach_load_cmd_t {
@@ -498,7 +499,7 @@ int exec_load_macho (inode_t *file, void **dest, void **entry, void **end,
             break;
         case LC_PREBOUND_DYLIB:
             break;
-        case 0x17:
+        case LC_0x17:
             /* ? */
             break;
         default:
