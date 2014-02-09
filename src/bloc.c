@@ -1038,7 +1038,7 @@ static int ide_initialize (bloc_device_t *bd, int device)
         status = ide_port_read(bd, 0x07);
         if (status != 0x08) {
             ERROR("ATAPI TEST_UNIT_READY : status %0x != 0x08\n", status);
-            return -1;
+            /*return -1;*/ /* fails to boot from cdrom? */
         }
         for (i = 0; i < 3; i++) {
             ide_data_writel(bd, ldswap32(&atapi_buffer[i]));
