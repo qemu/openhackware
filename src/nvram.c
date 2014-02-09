@@ -334,6 +334,7 @@ int NVRAM_format (nvram_t *nvram)
         ret = NVRAM_chrp_format(nvram);
         break;
     case ARCH_MAC99:
+    case ARCH_HEATHROW: /* XXX: may be incorrect */
         ret = NVRAM_mac99_format(nvram);
         break;
     case ARCH_POP:
@@ -409,13 +410,12 @@ nvram_t *NVRAM_get_config (uint32_t *RAM_size, int *boot_device,
         arch = ARCH_MAC99;
     } else if (strcmp(sign, "POP") == 0) {
         arch = ARCH_POP;
+    } else if (strcmp(sign, "HEATHROW") == 0) {
+        arch = ARCH_HEATHROW;
     } else {
         ERROR("Unknown PPC architecture: '%s'\n", sign);
         return NULL;
     }
-    /* HACK */
-    if (arch == ARCH_CHRP)
-        arch = ARCH_MAC99;
     lword = NVRAM_get_lword(nvram, 0x30);
     *RAM_size = lword;
     byte = NVRAM_get_byte(nvram, 0x34);

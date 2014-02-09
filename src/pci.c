@@ -99,8 +99,8 @@ struct pci_device_t {
     uint16_t min_grant;
     uint16_t max_latency;
     uint8_t  irq_line;
-    uint32_t regions[6];
-    uint32_t sizes[6];
+    uint32_t regions[7]; /* the region 6 is the PCI ROM */
+    uint32_t sizes[7];
     pci_device_t *next;
 };
 
@@ -158,6 +158,7 @@ struct pci_ops_t {
 
 /* IRQ numbers assigned to PCI IRQs */
 static uint8_t prep_pci_irqs[4] = { 9, 11, 9, 11 };
+static uint8_t heathrow_pci_irqs[4] = { 0x15, 0x16, 0x17, 0x18 };
 static uint8_t pmac_pci_irqs[4] = { 8, 9, 10, 11 };
 
 /* PREP PCI host */
@@ -399,6 +400,79 @@ static pci_ops_t uninorth_pci_ops = {
     &uninorth_config_readl, &uninorth_config_writel,
 };
 
+/* Grackle PCI host */
+
+static uint32_t grackle_cfg_address (pci_bridge_t *bridge,
+                                     uint8_t bus, uint8_t devfn,
+                                     uint8_t offset)
+{
+    uint32_t addr;
+    addr = 0x80000000 | (bus << 16) | (devfn << 8) | (offset & 0xfc);
+    stswap32((uint32_t *)bridge->cfg_addr, addr);
+    return bridge->cfg_data + (offset & 3);
+}
+
+static uint8_t grackle_config_readb (pci_bridge_t *bridge,
+                                      uint8_t bus, uint8_t devfn,
+                                      uint8_t offset)
+{
+    uint32_t addr;
+    addr = grackle_cfg_address(bridge, bus, devfn, offset);
+    return *((uint8_t *)addr);
+}
+
+static void grackle_config_writeb (pci_bridge_t *bridge,
+                                    uint8_t bus, uint8_t devfn,
+                                    uint8_t offset, uint8_t val)
+{
+    uint32_t addr;
+    addr = grackle_cfg_address(bridge, bus, devfn, offset);
+    *((uint8_t *)addr) = val;
+}
+
+static uint16_t grackle_config_readw (pci_bridge_t *bridge,
+                                       uint8_t bus, uint8_t devfn,
+                                       uint8_t offset)
+{
+    uint32_t addr;
+    addr = grackle_cfg_address(bridge, bus, devfn, offset);
+    return ldswap16((uint16_t *)addr);
+}
+
+static void grackle_config_writew (pci_bridge_t *bridge,
+                                    uint8_t bus, uint8_t devfn,
+                                    uint8_t offset, uint16_t val)
+{
+    uint32_t addr;
+    addr = grackle_cfg_address(bridge, bus, devfn, offset);
+    stswap16((uint16_t *)addr, val);
+}
+
+static uint32_t grackle_config_readl (pci_bridge_t *bridge,
+                                       uint8_t bus, uint8_t devfn,
+                                       uint8_t offset)
+{
+    uint32_t addr;
+    addr = grackle_cfg_address(bridge, bus, devfn, offset);
+    return ldswap32((uint32_t *)addr);
+}
+
+static void grackle_config_writel (pci_bridge_t *bridge,
+                                    uint8_t bus, uint8_t devfn,
+                                    uint8_t offset, uint32_t val)
+{
+    uint32_t addr;
+
+    addr = grackle_cfg_address(bridge, bus, devfn, offset);
+    stswap32((uint32_t *)addr, val);
+}
+
+static pci_ops_t grackle_pci_ops = {
+    &grackle_config_readb, &grackle_config_writeb,
+    &grackle_config_readw, &grackle_config_writew,
+    &grackle_config_readl, &grackle_config_writel,
+};
+
 static inline uint8_t pci_config_readb (pci_bridge_t *bridge,
                                         uint8_t bus, uint8_t devfn,
                                         uint8_t offset)
@@ -466,12 +540,22 @@ static pci_subclass_t undef_subclass[] = {
     },
 };
 
+static int ide_config_cb2 (pci_device_t *device)
+{
+    OF_finalize_pci_ide(device->common.OF_private,
+                        device->regions[0] & ~0x0000000F,
+                        device->regions[1] & ~0x0000000F,
+                        device->regions[2] & ~0x0000000F,
+                        device->regions[3] & ~0x0000000F);
+    return 0;
+}
+
 static pci_dev_t ide_devices[] = {
     {
-        0x8086, 0x0100,
-        NULL, "Qemu IDE", "Qemu IDE",    "ide",
+        0x1095, 0x0646, /* CMD646 IDE controller */
+        "pci-ide", "pci-ata", NULL, NULL,
         0, 0, 0,
-        NULL, NULL,
+        ide_config_cb2, NULL,
     },
     {
         0xFFFF, 0xFFFF,
@@ -481,7 +565,9 @@ static pci_dev_t ide_devices[] = {
     },
 };
 
-static int ide_config_cb (pci_device_t *device)
+#if 0
+/* should base it on PCI ID, not on arch */
+static int ide_config_cb (unused pci_device_t *device)
 {
     printf("Register IDE controller\n");
     switch (arch) {
@@ -491,14 +577,8 @@ static int ide_config_cb (pci_device_t *device)
                               device->common.OF_private);
         break;
     default:
-        ide_pci_pc_register(device->regions[0] & ~0x0000000F,
-                            device->regions[1] & ~0x0000000F,
-                            device->regions[2] & ~0x0000000F,
-                            device->regions[3] & ~0x0000000F,
-                            device->common.OF_private);
         break;
     }
-
     return 0;
 }
 
@@ -512,16 +592,12 @@ static int ata_config_cb (pci_device_t *device)
                               device->common.OF_private);
         break;
     default:
-        ide_pci_pc_register(device->regions[0] & ~0x0000000F,
-                            device->regions[1] & ~0x0000000F,
-                            device->regions[2] & ~0x0000000F,
-                            device->regions[3] & ~0x0000000F,
-                            device->common.OF_private);
         break;
     }
 
     return 0;
 }
+#endif
 
 static pci_subclass_t mass_subclass[] = {
     {
@@ -530,7 +606,7 @@ static pci_subclass_t mass_subclass[] = {
     },
     {
         0x01, "IDE controller",             "ide", ide_devices, NULL,
-        &ide_config_cb, NULL,
+        NULL, NULL,
     },
     {
         0x02, "Floppy disk controller",     NULL,  NULL, NULL,
@@ -546,7 +622,7 @@ static pci_subclass_t mass_subclass[] = {
     },
     {
         0x05, "ATA controller",             "ata", NULL, NULL,
-        &ata_config_cb, NULL,
+        NULL, NULL,
     },
     {
         0x80, "misc mass-storage controller", NULL, NULL, NULL,
@@ -646,7 +722,9 @@ static int vga_config_cb (pci_device_t *device)
         /* VGA 640x480x16 */
         OF_vga_register(device->common.device->name,
                         device->regions[0] & ~0x0000000F,
-                        vga_width, vga_height, vga_depth);
+                        vga_width, vga_height, vga_depth,
+                        device->regions[6] & ~0x0000000F,
+                        device->sizes[6]);
     }
     vga_console_register();
 
@@ -750,6 +828,13 @@ static pci_dev_t PREP_fake_bridge = {
     NULL, &PREP_pci_ops,
 };
 
+pci_dev_t grackle_fake_bridge = {
+    0xFFFF, 0xFFFF,
+    "pci", "pci-bridge", "DEC,21154", "DEC,21154.pci-bridge",
+    -1, -1, -1,
+    NULL, &grackle_pci_ops,
+};
+
 static pci_dev_t hbrg_devices[] = {
     {
         0x106B, 0x0020, NULL,
@@ -758,8 +843,8 @@ static pci_dev_t hbrg_devices[] = {
         NULL, &uninorth_agp_fake_bridge,
     },
     {
-        0x106B, 0x001F,
-        NULL, "pci", "AAPL,UniNorth", "uni-north",
+        0x106B, 0x001F, NULL, 
+        "pci", "AAPL,UniNorth", "uni-north",
         3, 2, 1,
         NULL, &uninorth_fake_bridge,
     },
@@ -770,10 +855,10 @@ static pci_dev_t hbrg_devices[] = {
         NULL, &uninorth_fake_bridge,
     },
     {
-        0x1011, 0x0026, NULL,
-        "pci-bridge", NULL, NULL,
+        0x1057, 0x0002, "pci",
+        "pci", "MOT,MPC106", "grackle",
         3, 2, 1,
-        NULL, &PREP_pci_ops,
+        NULL, &grackle_fake_bridge,
     },
     {
         0x1057, 0x4801, NULL,
@@ -1443,7 +1528,14 @@ static int macio_config_cb (pci_device_t *device)
 }
 
 static const pci_dev_t misc_pci[] = {
-    /* Apple Mac-io controller */
+    /* Paddington Mac I/O */
+    { 
+        0x106B, 0x0017,
+        "mac-io", "mac-io", "AAPL,343S1211", "paddington\1heathrow",
+        1, 1, 1,
+        &macio_config_cb, NULL,
+    },
+    /* KeyLargo Mac I/O */
     { 
         0x106B, 0x0022,
         "mac-io", "mac-io", "AAPL,Keylargo", "Keylargo",
@@ -1599,7 +1691,7 @@ static inline void pci_update_device (pci_bridge_t *bridge,
                                       uint8_t min_grant, uint8_t max_latency,
                                       int irq_line)
 {
-    uint32_t cmd;
+    uint32_t cmd, addr;
     int i;
 
     device->min_grant = min_grant;
@@ -1611,22 +1703,28 @@ static inline void pci_update_device (pci_bridge_t *bridge,
         printf("MAP PCI device %d:%d to IRQ %d\n",
                device->bus, device->devfn, irq_line);
     }
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < 7; i++) {
         if ((device->regions[i] & ~0xF) != 0x00000000 &&
             (device->regions[i] & ~0xF) != 0xFFFFFFF0) {
             printf("Map PCI device %d:%d %d to %0x %0x (%s)\n",
                    device->bus, device->devfn, i,
                    device->regions[i], device->sizes[i],
-                   device->regions[i] & 0x00000001 ? "I/O" : "memory");
+                   (device->regions[i] & 0x00000001) && i != 6 ? "I/O" : 
+                    "memory");
+            if (i != 6) {
             cmd = pci_config_readl(bridge, device->bus, device->devfn, 0x04);
             if (device->regions[i] & 0x00000001)
                 cmd |= 0x00000001;
             else
                 cmd |= 0x00000002;
             pci_config_writel(bridge, device->bus, device->devfn, 0x04, cmd);
+            }
+            if (i == 6)
+                addr = 0x30; /* PCI ROM */
+            else
+                addr = 0x10 + (i * sizeof(uint32_t));
             pci_config_writel(bridge, device->bus, device->devfn,
-                              0x10 + (i * sizeof(uint32_t)),
-                              device->regions[i]);
+                              addr, device->regions[i]);
         }
     }
 }
@@ -1900,7 +1998,7 @@ static pci_u_t *pci_check_device (pci_host_t **hostp, pci_host_t **phost,
         goto out;
     }
     ret = (pci_u_t *)newd;
-    max_areas = 6;
+    max_areas = 7;
     /* register PCI device in OF tree */
     if (bridge->dev.common.type == PCI_FAKE_BRIDGE) {
         newd->common.OF_private =
@@ -1927,6 +2025,9 @@ static pci_u_t *pci_check_device (pci_host_t **hostp, pci_host_t **phost,
             /* Handle 64 bits memory mapping */
             continue;
         }
+        if (i == 6)
+            addr = 0x30; /* PCI ROM */
+        else
         addr = 0x10 + (i * sizeof(uint32_t));
         /* Get region size
          * Note: we assume it's always a power of 2
@@ -1935,7 +2036,7 @@ static pci_u_t *pci_check_device (pci_host_t **hostp, pci_host_t **phost,
         smask = pci_config_readl(bridge, bus, devfn, addr);
         if (smask == 0x00000000 || smask == 0xFFFFFFFF)
             continue;
-        if (smask & 0x00000001) {
+        if ((smask & 0x00000001) != 0 && i != 6) {
             /* I/O space */
             base = io_base;
             /* Align to a minimum of 256 bytes (arbitrary) */
@@ -1947,6 +2048,8 @@ static pci_u_t *pci_check_device (pci_host_t **hostp, pci_host_t **phost,
             /* Align to a minimum of 64 kB (arbitrary) */
             min_align = 1 << 16;
             amask = 0x0000000F;
+            if (i == 6)
+                smask |= 1; /* PCI ROM enable */
         }
         omask = smask & amask;
         smask &= ~amask;
@@ -1980,7 +2083,10 @@ static pci_u_t *pci_check_device (pci_host_t **hostp, pci_host_t **phost,
     if (irq_pin > 0) {
         /* assign the IRQ */
         irq_pin = ((devfn >> 3) + irq_pin - 1) & 3;
-        if (arch == ARCH_PREP) {
+        /* XXX: should base it on the PCI bridge type, not the arch */
+        switch(arch) {
+        case ARCH_PREP:
+            {
             int elcr_port, val;
             irq_line = prep_pci_irqs[irq_pin];
             /* set the IRQ to level-sensitive */
@@ -1988,14 +2094,22 @@ static pci_u_t *pci_check_device (pci_host_t **hostp, pci_host_t **phost,
             val = inb(elcr_port);
             val |= 1 << (irq_line & 7);
             outb(elcr_port, val);
-        } else {
+            }
+            break;
+        case ARCH_MAC99:
             irq_line = pmac_pci_irqs[irq_pin];
+            break;
+        case ARCH_HEATHROW:
+            irq_line = heathrow_pci_irqs[irq_pin];
+            break;
+        default:
+            break;
         }
     }
  update_device:
     pci_update_device(bridge, newd, min_grant, max_latency, irq_line);
     OF_finalize_pci_device(newd->common.OF_private, bus, devfn,
-                           newd->regions, newd->sizes);
+                           newd->regions, newd->sizes, irq_line);
     /* Call special inits if needed */
     if (dev->config_cb != NULL)
         (*dev->config_cb)(newd);
@@ -2048,6 +2162,32 @@ static int pci_check_host (pci_host_t **hostp,
         break;
     case ARCH_CHRP:
         /* TODO */
+        break;
+    case ARCH_HEATHROW:
+        dev = pci_find_device(0x06, 0x00, 0xFF, checkv, checkp);
+        if (dev == NULL)
+            return -1;
+        fake_host = pci_add_host(hostp, dev,
+                                 (0x06 << 24) | (0x00 << 16) | (0xFF << 8));
+        if (fake_host == NULL)
+            return -1;
+        fake_host->dev.common.type = PCI_FAKE_HOST;
+        dev = &grackle_fake_bridge;
+        if (dev == NULL)
+            goto free_fake_host;
+        fake_bridge = pci_add_bridge(fake_host, 0, 0, dev,
+                                     (0x06 << 24) | (0x04 << 16) | (0xFF << 8),
+                                     cfg_base, cfg_len,
+                                     cfg_base + 0x7ec00000,
+                                     cfg_base + 0x7ee00000,
+                                     mem_base, mem_len,
+                                     io_base, io_len,
+                                     rbase, rlen,
+                                     0,
+                                     &grackle_pci_ops);
+        if (fake_bridge == NULL)
+            goto free_fake_host;
+        fake_bridge->dev.common.type = PCI_FAKE_BRIDGE;
         break;
     case ARCH_MAC99:
         dev = pci_find_device(0x06, 0x00, 0xFF, checkv, checkp);
@@ -2166,6 +2306,30 @@ pci_host_t *pci_init (void)
         break;
     case ARCH_CHRP:
         /* TODO */
+        break;
+    case ARCH_HEATHROW:
+        cfg_base = 0x80000000;
+        cfg_len  = 0x7f000000;
+        mem_base = 0x80000000;
+        mem_len  = 0x01000000;
+        io_base  = 0xfe000000;
+        io_len   = 0x00800000;
+#if 1
+        rbase    = 0xfd000000;
+        rlen     = 0x01000000;
+#else
+        rbase    = 0x00000000;
+        rlen     = 0x01000000;
+#endif
+        if (pci_check_host(&pci_main, cfg_base, cfg_len,
+                           mem_base, mem_len, io_base, io_len, rbase, rlen,
+                           0x1057, 0x0002) == 0) {
+            isa_io_base = io_base;
+            busnum++;
+        }
+        for (curh = pci_main; curh->next != NULL; curh = curh->next)
+            continue;
+        pci_check_devices(curh);
         break;
     case ARCH_MAC99:
         /* We are supposed to have 3 host bridges:

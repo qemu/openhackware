@@ -489,7 +489,7 @@ static OF_node_t *OF_node_create (OF_env_t *env, OF_node_t *parent,
         ERROR("%s can't alloc new node '%s' name\n", __func__, name);
         return NULL;
     }
-    new->prop_address = OF_prop_int_new(env, new, "address", address);
+    new->prop_address = OF_prop_int_new(env, new, "unit-address", address);
     if (new->prop_address == NULL) {
         free(new->prop_name->value);
         free(new->prop_name);
@@ -1017,6 +1017,33 @@ static OF_prop_t *OF_prop_string_new (OF_env_t *env, OF_node_t *node,
                            string, strlen(string) + 1);
 }
 
+/* convert '\1' char to '\0' */
+static OF_prop_t *OF_prop_string_new1 (OF_env_t *env, OF_node_t *node,
+                                       const unsigned char *name,
+                                       const unsigned char *string)
+{
+    int len, i;
+    OF_prop_t *ret;
+    unsigned char *str;
+
+    if (strchr(string, '\1') == NULL) {
+        return OF_prop_string_new(env, node, name, string);
+    } else {
+        len = strlen(string) + 1;
+        str = malloc(len);
+        if (!str)
+            return NULL;
+        memcpy(str, string, len);
+        for(i = 0; i < len; i++)
+            if (str[i] == '\1')
+                str[i] = '\0';
+        ret = OF_property_new(env, node, name,
+                              str, len);
+        free(str);
+        return ret;
+    }
+}
+
 __attribute__ (( section (".OpenFirmware") ))
 static OF_prop_t *OF_prop_int_new (OF_env_t *env, OF_node_t *node,
                                    const unsigned char *name, uint32_t value)
@@ -1421,15 +1448,12 @@ static OF_env_t *OF_env_main;
 __attribute__ (( section (".OpenFirmware") ))
 int OF_init (void)
 {
-    const unsigned char compat_str[] =
 #if 0
         "PowerMac3,1\0MacRISC\0Power Macintosh\0";
         "PowerMac1,2\0MacRISC\0Power Macintosh\0";
         "AAPL,PowerMac G3\0PowerMac G3\0MacRISC\0Power Macintosh\0";
         "AAPL,PowerMac3,0\0MacRISC\0Power Macintosh\0";
         "AAPL,Gossamer\0MacRISC\0Power Macintosh\0";
-#else
-        "AAPL,PowerMac G3\0PowerMac G3\0MacRISC\0Power Macintosh\0";
 #endif
     OF_env_t *OF_env;
     OF_node_t *als, *opt, *chs, *pks;
@@ -1455,15 +1479,21 @@ int OF_init (void)
         return -1;
     }
     OF_prop_string_new(OF_env, OF_node_root, "device_type", "bootrom");
-#if 0
+    if (arch == ARCH_HEATHROW) {
+        const unsigned char compat_str[] =
+            "PowerMac1,1\0MacRISC\0Power Macintosh";
+        OF_property_new(OF_env, OF_node_root, "compatible",
+                        compat_str, sizeof(compat_str));
     OF_prop_string_new(OF_env, OF_node_root,
-                       "model", "PPC Open Hack'Ware " BIOS_VERSION);
-#else
-    OF_prop_string_new(OF_env, OF_node_root,
-                       "model", compat_str);
-#endif
+                           "model", "Power Macintosh");
+    } else {
+        const unsigned char compat_str[] =
+            "PowerMac3,1\0MacRISC\0Power Macintosh";
     OF_property_new(OF_env, OF_node_root, "compatible",
                     compat_str, sizeof(compat_str));
+        OF_prop_string_new(OF_env, OF_node_root,
+                           "model", "PowerMac3,1");
+    }
 #if 0
     OF_prop_string_new(OF_env, OF_node_root, "copyright", copyright);
 #else
@@ -1561,14 +1591,15 @@ int OF_init (void)
         range.size = 0x00800000;
         OF_property_new(OF_env, rom, "ranges", &range, sizeof(OF_range_t));
         OF_prop_int_new(OF_env, rom, "#address-cells", 1);
+
         /* "/rom/boot-rom@fff00000" node */
-        brom = OF_node_new(OF_env, OF_node_root, "boot-rom", 0xfff00000);
+        brom = OF_node_new(OF_env, rom, "boot-rom", 0xfff00000);
         if (brom == NULL) {
             ERROR("Cannot create 'boot-rom'\n");
             return -1;
         }
         regs.address = 0xFFF00000;
-        regs.size = 0x00010000;
+        regs.size = 0x00100000;
         OF_property_new(OF_env, brom, "reg", &regs, sizeof(OF_regprop_t));
         OF_prop_string_new(OF_env, brom, "write-characteristic", "flash");
         OF_prop_string_new(OF_env, brom, "BootROM-build-date",
@@ -1577,7 +1608,7 @@ int OF_init (void)
         OF_prop_string_new(OF_env, brom, "copyright", copyright);
         OF_prop_string_new(OF_env, brom, "model", BIOS_str);
         OF_prop_int_new(OF_env, brom, "result", 0);
-#if 0
+#if 1
         {
             /* Hack taken 'as-is' from PearPC */
             unsigned char info[] = {
@@ -1596,7 +1627,9 @@ int OF_init (void)
         OF_node_put(OF_env, brom);
         OF_node_put(OF_env, rom);
     }
+#if 0
     /* From here, hardcoded hacks to get a Mac-like machine */
+    /* XXX: Core99 does not seem to like this NVRAM tree */
     /* "/nvram@fff04000" node */
     {
         OF_regprop_t regs;
@@ -1617,6 +1650,7 @@ int OF_init (void)
         OF_prop_int_new(OF_env, chs, "nvram", OF_pack_handle(OF_env, nvr));
         OF_node_put(OF_env, nvr);
     }
+#endif
     /* "/pseudo-hid" : hid emulation as Apple does */
     {
         OF_node_t *hid;
@@ -1663,7 +1697,27 @@ int OF_init (void)
         }
         OF_node_put(OF_env, hid);
     }
+    if (arch == ARCH_MAC99) {
+        OF_node_t *unin;
+        OF_regprop_t regs;
 
+        unin = OF_node_new(OF_env, OF_node_root,
+                           "uni-n", 0xf8000000);
+        if (unin == NULL) {
+            ERROR("Cannot create 'uni-n'\n");
+            return -1;
+        }
+        OF_prop_string_new(OF_env, unin, "device-type", "memory-controller");
+        OF_prop_string_new(OF_env, unin, "model", "AAPL,UniNorth");
+        OF_prop_string_new(OF_env, unin, "compatible", "uni-north");
+        regs.address = 0xf8000000;
+        regs.size = 0x01000000;
+        OF_property_new(OF_env, unin, "reg", &regs, sizeof(regs));
+        OF_prop_int_new(OF_env, unin, "#address-cells", 1);
+        OF_prop_int_new(OF_env, unin, "#size-cells", 1);
+        OF_prop_int_new(OF_env, unin, "device-rev", 3);
+        OF_node_put(OF_env, unin);
+    }
     
 #if 1 /* This is mandatory for claim to work
        * but I don't know where it should really be (in cpu ?)
@@ -1693,7 +1747,9 @@ int OF_init (void)
 
     /* "/options/boot-args" node */
     {
-        const unsigned char *args = "-v rootdev cdrom";
+        //        const unsigned char *args = "-v rootdev cdrom";
+        //const unsigned char *args = "-v io=0xffffffff";
+        const unsigned char *args = "-v";
         /* Ask MacOS X to print debug messages */
         //        OF_prop_string_new(OF_env, chs, "machargs", args);
         //        OF_prop_string_new(OF_env, opt, "boot-command", args);
@@ -2013,17 +2069,17 @@ static void *OF_pci_device_new (OF_env_t *OF_env, OF_node_t *parent,
     OF_prop_int_new(OF_env, node, "min-grant", min_grant);
     OF_prop_int_new(OF_env, node, "max-latency", max_latency);
     if (dev->type != NULL)
-        OF_prop_string_new(OF_env, node, "device_type", dev->type);
+        OF_prop_string_new1(OF_env, node, "device_type", dev->type);
     if (dev->compat != NULL)
-        OF_prop_string_new(OF_env, node, "compatible", dev->compat);
+        OF_prop_string_new1(OF_env, node, "compatible", dev->compat);
     if (dev->model != NULL)
-        OF_prop_string_new(OF_env, node, "model", dev->model);
+        OF_prop_string_new1(OF_env, node, "model", dev->model);
     if (dev->acells != 0)
         OF_prop_int_new(OF_env, node, "#address-cells", dev->acells);
     if (dev->scells != 0)
-        OF_prop_int_new(OF_env, node, "#interrupt-cells", dev->acells);
+        OF_prop_int_new(OF_env, node, "#size-cells", dev->scells);
     if (dev->icells != 0)
-        OF_prop_int_new(OF_env, node, "#size-cells", dev->acells);
+        OF_prop_int_new(OF_env, node, "#interrupt-cells", dev->icells);
     dprintf("Done %p %p\n", parent, node);
     
     return node;
@@ -2040,8 +2096,9 @@ void *OF_register_pci_host (pci_dev_t *dev, uint16_t rev, uint32_t ccode,
     OF_env_t *OF_env;
     pci_range_t ranges[3];
     OF_regprop_t regs[1];
-    OF_node_t *pci_host;
+    OF_node_t *pci_host, *als;
     int nranges;
+    unsigned char buffer[OF_NAMELEN_MAX];
 
     OF_env = OF_env_main;
     dprintf("register PCI host '%s' '%s' '%s' '%s'\n",
@@ -2052,6 +2109,17 @@ void *OF_register_pci_host (pci_dev_t *dev, uint16_t rev, uint32_t ccode,
         ERROR("Cannot create pci host\n");
         return NULL;
     }
+    
+    als = OF_node_get(OF_env, "aliases");
+    if (als == NULL) {
+        ERROR("Cannot get 'aliases'\n");
+        return NULL;
+    }
+    sprintf(buffer, "/%s", dev->name);
+    OF_prop_string_set(OF_env, als, "pci", buffer);
+    OF_node_put(OF_env, als);
+    
+
     regs[0].address = cfg_base;
     regs[0].size = cfg_len;
     OF_property_new(OF_env, pci_host, "reg", regs, sizeof(OF_regprop_t));
@@ -2136,6 +2204,11 @@ void *OF_register_pci_device (void *parent, pci_dev_t *dev,
     return pci_dev;
 }
 
+/* XXX: suppress that, used for interrupt map init */
+OF_node_t *pci_host_node;
+uint32_t pci_host_interrupt_map[7 * 32];
+int pci_host_interrupt_map_len = 0;
+
 void OF_finalize_pci_host (void *dev, int first_bus, int nb_busses)
 {
     OF_env_t *OF_env;
@@ -2145,10 +2218,12 @@ void OF_finalize_pci_host (void *dev, int first_bus, int nb_busses)
     regs[0].address = first_bus;
     regs[0].size = nb_busses;
     OF_property_new(OF_env, dev, "bus-range", regs, sizeof(OF_regprop_t));
+    pci_host_node = dev;
 }
 
 void OF_finalize_pci_device (void *dev, uint8_t bus, uint8_t devfn,
-                             uint32_t *regions, uint32_t *sizes)
+                             uint32_t *regions, uint32_t *sizes,
+                             int irq_line)
 {
     OF_env_t *OF_env;
     pci_reg_prop_t pregs[6], rregs[6];
@@ -2156,6 +2231,7 @@ void OF_finalize_pci_device (void *dev, uint8_t bus, uint8_t devfn,
     int i, j, k;
 
     OF_env = OF_env_main;
+    /* XXX: only useful for VGA card in fact */
     if (regions[0] != 0x00000000)
         OF_prop_int_set(OF_env, dev, "address", regions[0] & ~0x0000000F);
     for (i = 0, j = 0, k = 0; i < 6; i++) {
@@ -2222,7 +2298,22 @@ void OF_finalize_pci_device (void *dev, uint8_t bus, uint8_t devfn,
     } else {
         OF_property_new(OF_env, dev, "assigned-addresses", NULL, 0);
     }
-#if 0
+    if (irq_line >= 0) {
+        int i;
+        OF_prop_int_new(OF_env, dev, "interrupts", 1);
+        i = pci_host_interrupt_map_len;
+        pci_host_interrupt_map[i++] = (devfn << 8) & 0xf800;
+        pci_host_interrupt_map[i++] = 0;
+        pci_host_interrupt_map[i++] = 0;
+        pci_host_interrupt_map[i++] = 0;
+        pci_host_interrupt_map[i++] = 0; /* pic handle will be patched later */
+        pci_host_interrupt_map[i++] = irq_line;
+        if (arch != ARCH_HEATHROW) {
+            pci_host_interrupt_map[i++] = 1;
+        }
+        pci_host_interrupt_map_len = i;
+    }
+#if 1
     {
         OF_prop_t *prop_name = ((OF_node_t *)dev)->prop_name;
 
@@ -2390,6 +2481,54 @@ int OF_register_stdio (const unsigned char *dev_in,
     return 0;
 }
 
+static void keylargo_ata(OF_node_t *mio, uint32_t base_address,
+                         uint32_t base, int irq1, int irq2, 
+                         uint16_t pic_phandle)
+{
+    OF_env_t *OF_env = OF_env_main;
+    OF_node_t *ata;
+    OF_regprop_t regs[2];
+
+    ata = OF_node_new(OF_env, mio, "ata-4", base);
+    if (ata == NULL) {
+        ERROR("Cannot create 'ata-4'\n");
+        return;
+    }
+    OF_prop_string_new(OF_env, ata, "device_type", "ata");
+#if 1
+    OF_prop_string_new(OF_env, ata, "compatible", "key2largo-ata");
+    OF_prop_string_new(OF_env, ata, "model", "ata-4");
+    OF_prop_string_new(OF_env, ata, "cable-type", "80-conductor");
+#else
+    OF_prop_string_new(OF_env, ata, "compatible", "cmd646-ata");
+    OF_prop_string_new(OF_env, ata, "model", "ata-4");
+#endif
+    OF_prop_int_new(OF_env, ata, "#address-cells", 1);
+    OF_prop_int_new(OF_env, ata, "#size-cells", 0);
+    regs[0].address = base;
+    regs[0].size = 0x00001000;
+#if 0 // HACK: Don't set up DMA registers
+    regs[1].address = 0x00008A00;
+    regs[1].size = 0x00001000;
+    OF_property_new(OF_env, ata, "reg",
+                    regs, 2 * sizeof(OF_regprop_t));
+#else
+    OF_property_new(OF_env, ata, "reg",
+                    regs, sizeof(OF_regprop_t));
+#endif
+    OF_prop_int_new(OF_env, ata, "interrupt-parent", pic_phandle);
+    regs[0].address = irq1;
+    regs[0].size = 0x00000001;
+    regs[1].address = irq2;
+    regs[1].size = 0x00000000;
+    OF_property_new(OF_env, ata, "interrupts",
+                    regs, 2 * sizeof(OF_regprop_t));
+    if (base == 0x1f000)
+        ide_pci_pmac_register(base_address + base, 0x00000000, ata);
+    else
+        ide_pci_pmac_register(0x00000000, base_address + base, ata);
+}
+
 void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
                             void *private_data)
 {
@@ -2398,6 +2537,8 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
     pci_reg_prop_t pregs[2];
     OF_node_t *mio, *chs, *als;
     uint16_t pic_phandle;
+    int rec_len;
+    OF_prop_t *mio_reg;
 
     OF_DPRINTF("mac-io: %p\n", dev);
     OF_env = OF_env_main;
@@ -2416,10 +2557,14 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
     mio = dev;
     mio->private_data = private_data;
     pregs[0].addr.hi = 0x00000000;
-    pregs[0].addr.mid = 0x82013810;
+    pregs[0].addr.mid = 0x00000000;
     pregs[0].addr.lo = 0x00000000;
     pregs[0].size_hi = base_address;
     pregs[0].size_lo = size;
+    mio_reg = OF_property_get(OF_env, mio, "reg");
+    if (mio_reg && mio_reg->vlen >= 5 * 4) {
+        pregs[0].addr.mid = ((pci_reg_prop_t *)mio_reg->value)->addr.hi;
+    }
     OF_property_new(OF_env, mio, "ranges",
                     &pregs, sizeof(pci_reg_prop_t));
 #if 0
@@ -2431,8 +2576,32 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
     OF_property_new(OF_env, mio, "assigned-addresses",
                     &pregs, sizeof(pci_reg_prop_t));
 #endif
+
+    if (arch == ARCH_HEATHROW) {
+        /* Heathrow PIC */
+        OF_regprop_t regs;
+        OF_node_t *mpic;
+        const char compat_str[] = "heathrow\0mac-risc";
+
+        mpic = OF_node_new(OF_env, mio, "interrupt-controller", 0x10);
+        if (mpic == NULL) {
+            ERROR("Cannot create 'mpic'\n");
+            goto out;
+        }
+        OF_prop_string_new(OF_env, mpic, "device_type", "interrupt-controller");
+        OF_property_new(OF_env, mpic, "compatible", compat_str, sizeof(compat_str));
+        OF_prop_int_new(OF_env, mpic, "#interrupt-cells", 1);
+        regs.address = 0x10;
+        regs.size = 0x20;
+        OF_property_new(OF_env, mpic, "reg",
+                        &regs, sizeof(regs));
+        OF_property_new(OF_env, mpic, "interrupt-controller", NULL, 0);
+        pic_phandle = OF_pack_handle(OF_env, mpic);
+        OF_prop_int_new(OF_env, chs, "interrupt-controller", pic_phandle);
+        OF_node_put(OF_env, mpic);
+        rec_len = 6;
+    } else {
     /* OpenPIC */
-    {
         OF_regprop_t regs[4];
         OF_node_t *mpic;
         mpic = OF_node_new(OF_env, mio, "interrupt-controller", 0x40000);
@@ -2455,8 +2624,37 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
         pic_phandle = OF_pack_handle(OF_env, mpic);
         OF_prop_int_new(OF_env, chs, "interrupt-controller", pic_phandle);
         OF_node_put(OF_env, mpic);
+        rec_len = 7;
     }
-#if 1
+
+    /* patch pci host table */
+    /* XXX: do it after the PCI init */
+    {
+        int i;
+        uint32_t tab[4];
+
+        for(i = 0; i < pci_host_interrupt_map_len; i += rec_len)
+            pci_host_interrupt_map[i + 4] = pic_phandle;
+#if 0
+        dprintf("interrupt-map:\n");
+        for(i = 0; i < pci_host_interrupt_map_len; i++) {
+            dprintf(" %08x", pci_host_interrupt_map[i]);
+            if ((i % rec_len) == (rec_len - 1))
+                dprintf("\n");
+        }
+        dprintf("\n");
+#endif
+        OF_property_new(OF_env, pci_host_node, "interrupt-map", 
+                        pci_host_interrupt_map, 
+                        pci_host_interrupt_map_len * sizeof(uint32_t));
+        tab[0] = 0xf800;
+        tab[1] = 0;
+        tab[2] = 0;
+        tab[3] = 0;
+        OF_property_new(OF_env, pci_host_node, "interrupt-map-mask", 
+                        tab, 4 * sizeof(uint32_t));
+    }
+#if 0
     /* escc is useful to get MacOS X debug messages */
     {
         OF_regprop_t regs[8];
@@ -2645,85 +2843,12 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
         OF_node_put(OF_env, scc);
     }
 #endif
-    /* IDE controller */
-    {
-        OF_node_t *ata;
-        OF_regprop_t regs[2];
-        ata = OF_node_new(OF_env, mio, "ata-4", 0x1f000);
-        if (ata == NULL) {
-            ERROR("Cannot create 'ata-4'\n");
-            goto out;
-        }
-        OF_prop_string_new(OF_env, ata, "device_type", "ata");
-#if 1
-        OF_prop_string_new(OF_env, ata, "compatible", "keylargo-ata");
-        OF_prop_string_new(OF_env, ata, "model", "ata-4");
-#else
-        OF_prop_string_new(OF_env, ata, "compatible", "cmd646-ata");
-        OF_prop_string_new(OF_env, ata, "model", "ata-4");
-#endif
-        OF_prop_int_new(OF_env, ata, "#address-cells", 1);
-        OF_prop_int_new(OF_env, ata, "#size-cells", 0);
-        regs[0].address = 0x0001F000;
-        regs[0].size = 0x00001000;
-#if 0 // HACK: Don't set up DMA registers
-        regs[1].address = 0x00008A00;
-        regs[1].size = 0x00001000;
-        OF_property_new(OF_env, ata, "reg",
-                        regs, 2 * sizeof(OF_regprop_t));
-#else
-        OF_property_new(OF_env, ata, "reg",
-                        regs, sizeof(OF_regprop_t));
-#endif
-        OF_prop_int_new(OF_env, ata, "interrupt-parent", pic_phandle);
-        regs[0].address = 0x00000013;
-        regs[0].size = 0x00000001;
-        regs[1].address = 0x0000000B;
-        regs[1].size = 0x00000000;
-        OF_property_new(OF_env, ata, "interrupts",
-                        regs, 2 * sizeof(OF_regprop_t));
-        ide_pci_pmac_register(base_address + 0x1f000, 0x00000000, ata);
-
+    /* Keylargo IDE controller: need some work (DMA problem ?) */
+    if (arch == ARCH_MAC99) {
+        keylargo_ata(mio, base_address, 0x1f000, 0x13, 0xb, pic_phandle);
+        keylargo_ata(mio, base_address, 0x20000, 0x14, 0xb, pic_phandle);
     }
-    {
-        OF_node_t *ata;
-        OF_regprop_t regs[2];
-        ata = OF_node_new(OF_env, mio, "ata-4", 0x20000);
-        if (ata == NULL) {
-            ERROR("Cannot create 'ata-4'\n");
-            goto out;
-        }
-        OF_prop_string_new(OF_env, ata, "device_type", "ata");
-#if 1
-        OF_prop_string_new(OF_env, ata, "compatible", "keylargo-ata");
-        OF_prop_string_new(OF_env, ata, "model", "ata-4");
-#else
-        OF_prop_string_new(OF_env, ata, "compatible", "cmd646-ata");
-        OF_prop_string_new(OF_env, ata, "model", "ata-4");
-#endif
-        OF_prop_int_new(OF_env, ata, "#address-cells", 1);
-        OF_prop_int_new(OF_env, ata, "#size-cells", 0);
-        regs[0].address = 0x00020000;
-        regs[0].size = 0x00001000;
-#if 0 // HACK: Don't set up DMA registers
-        regs[1].address = 0x00008A00;
-        regs[1].size = 0x00001000;
-        OF_property_new(OF_env, ata, "reg",
-                        regs, 2 * sizeof(OF_regprop_t));
-#else
-        OF_property_new(OF_env, ata, "reg",
-                        regs, sizeof(OF_regprop_t));
-#endif
-        OF_prop_int_new(OF_env, ata, "interrupt-parent", pic_phandle);
-        regs[0].address = 0x00000014;
-        regs[0].size = 0x00000001;
-        regs[1].address = 0x0000000B;
-        regs[1].size = 0x00000000;
-        OF_property_new(OF_env, ata, "interrupts",
-                        regs, 2 * sizeof(OF_regprop_t));
-        ide_pci_pmac_register(0x00000000, base_address + 0x20000, ata);
-
-    }
+#if 0
     /* Timer */
     {
         OF_node_t *tmr;
@@ -2746,10 +2871,11 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
                         regs, sizeof(OF_regprop_t));
         OF_node_put(OF_env, tmr);
     }
+#endif
     /* VIA-PMU */
     {
         /* Controls adb, RTC and power-mgt (forget it !) */
-        OF_node_t *via, *adb, *rtc;
+        OF_node_t *via, *adb;
         OF_regprop_t regs[1];
 #if 0 // THIS IS A HACK AND IS COMPLETELY ABSURD !
       // (but needed has Qemu doesn't emulate via-pmu).
@@ -2773,14 +2899,21 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
         regs[0].size = 0x00002000;
         OF_property_new(OF_env, via, "reg", regs, sizeof(OF_regprop_t));
         OF_prop_int_new(OF_env, via, "interrupt-parent", pic_phandle);
+        if (arch == ARCH_HEATHROW) {
+            OF_prop_int_new(OF_env, via, "interrupts", 0x12);
+        } else {
         regs[0].address = 0x00000019;
         regs[0].size = 0x00000001;
         OF_property_new(OF_env, via, "interrupts",
                         regs, sizeof(OF_regprop_t));
+        }
+        /* force usage of OF bus speeds */
+        OF_prop_int_new(OF_env, via, "BusSpeedCorrect", 1);
 #if 0
         OF_prop_int_new(OF_env, via, "pmu-version", 0x00D0740C);
 #endif
-#if 1
+        {
+            OF_node_t *kbd, *mouse;
         /* ADB pseudo-device */
         adb = OF_node_new(OF_env, via, "adb", OF_ADDRESS_NONE);
         if (adb == NULL) {
@@ -2797,9 +2930,26 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
         OF_prop_int_new(OF_env, adb, "#size-cells", 0);
         OF_pack_get_path(OF_env, tmp, 512, adb);
         OF_prop_string_new(OF_env, als, "adb", tmp);
-        /* XXX: add "keyboard@2" and "mouse@3" */
-        OF_node_put(OF_env, adb);
-#endif
+
+            kbd = OF_node_new(OF_env, adb, "keyboard", 2);
+            if (kbd == NULL) {
+                ERROR("Cannot create 'kbd'\n");
+                goto out;
+            }
+            OF_prop_string_new(OF_env, kbd, "device_type", "keyboard");
+            OF_prop_int_new(OF_env, kbd, "reg", 2);
+
+            mouse = OF_node_new(OF_env, adb, "mouse", 3);
+            if (mouse == NULL) {
+                ERROR("Cannot create 'mouse'\n");
+                goto out;
+            }
+            OF_prop_string_new(OF_env, mouse, "device_type", "mouse");
+            OF_prop_int_new(OF_env, mouse, "reg", 3);
+            OF_prop_int_new(OF_env, mouse, "#buttons", 3);
+        }
+        {
+            OF_node_t *rtc;
         
         rtc = OF_node_new(OF_env, via, "rtc", OF_ADDRESS_NONE);
         if (rtc == NULL) {
@@ -2813,12 +2963,66 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
         OF_prop_string_new(OF_env, rtc, "compatible", "rtc");
 #endif
         OF_node_put(OF_env, rtc);
-        OF_node_put(OF_env, via);
     }
+        //        OF_node_put(OF_env, via);
+    }
+    {
+        OF_node_t *pmgt;
+        pmgt = OF_node_new(OF_env, mio, "power-mgt", OF_ADDRESS_NONE);
+        OF_prop_string_new(OF_env, pmgt, "device_type", "power-mgt");
+        OF_prop_string_new(OF_env, pmgt, "compatible", "cuda");
+        OF_prop_string_new(OF_env, pmgt, "mgt-kind", "min-consumption-pwm-led");
+        OF_node_put(OF_env, pmgt);
+    }
+
+    if (arch == ARCH_HEATHROW) {
+        /* NVRAM */
+        OF_node_t *nvr;
+        OF_regprop_t regs;
+        nvr = OF_node_new(OF_env, mio, "nvram", 0x60000);
+        OF_prop_string_new(OF_env, nvr, "device_type", "nvram");
+        regs.address = 0x60000;
+        regs.size = 0x00020000;
+        OF_property_new(OF_env, nvr, "reg", &regs, sizeof(regs));
+        OF_prop_int_new(OF_env, nvr, "#bytes", 0x2000);
+        OF_node_put(OF_env, nvr);
+    }
+
  out:
     //    OF_node_put(OF_env, mio);
     OF_node_put(OF_env, chs);
     OF_node_put(OF_env, als);
+}
+
+void OF_finalize_pci_ide (void *dev, 
+                          uint32_t io_base0, uint32_t io_base1,
+                          uint32_t io_base2, uint32_t io_base3)
+{
+    OF_env_t *OF_env = OF_env_main;
+    OF_node_t *pci_ata = dev;
+    OF_node_t *ata, *atas[2];
+    int i;
+
+    OF_prop_int_new(OF_env, pci_ata, "#address-cells", 1);
+    OF_prop_int_new(OF_env, pci_ata, "#size-cells", 0);
+
+    /* XXX: Darwin handles only one device */
+    for(i = 0; i < 1; i++) {
+        ata = OF_node_new(OF_env, pci_ata, "ata-4", i);
+        if (ata == NULL) {
+            ERROR("Cannot create 'ata-4'\n");
+            return;
+        }
+        OF_prop_string_new(OF_env, ata, "device_type", "ata");
+        OF_prop_string_new(OF_env, ata, "compatible", "cmd646-ata");
+        OF_prop_string_new(OF_env, ata, "model", "ata-4");
+        OF_prop_int_new(OF_env, ata, "#address-cells", 1);
+        OF_prop_int_new(OF_env, ata, "#size-cells", 0);
+        OF_prop_int_new(OF_env, ata, "reg", i);
+        atas[i] = ata;
+    }
+    ide_pci_pc_register(io_base0, io_base1, io_base2, io_base3,
+                        atas[0], atas[1]);
 }
 
 /*****************************************************************************/
@@ -2862,11 +3066,11 @@ static void OF_mmu_map (OF_env_t *OF_env)
     /* As we get a 1:1 mapping, do nothing */
     ihandle = popd(OF_env);
     args = (void *)popd(OF_env);
-    address = popd(OF_env);
-    virt = popd(OF_env);
-    size = popd(OF_env);
     popd(OF_env);
-    OF_DPRINTF("Translate address %0x %0x %0x %0x\n", ihandle, address,
+    size = popd(OF_env);
+    virt = popd(OF_env);
+    address = popd(OF_env);
+    OF_DPRINTF("Map %0x %0x %0x %0x\n", ihandle, address,
                virt, size);
     pushd(OF_env, 0);
 }
@@ -3270,7 +3474,7 @@ void *OF_blockdev_register (void *parent, void *private,
     OF_prop_string_new(OF_env, dsk, "device_type", "block");
     OF_prop_string_new(OF_env, dsk, "category", type);
     OF_prop_int_new(OF_env, dsk, "device_id", devnum);
-    OF_prop_int_new(OF_env, dsk, "reg", 0);
+    OF_prop_int_new(OF_env, dsk, "reg", devnum);
     OF_method_new(OF_env, dsk, "open", &OF_blockdev_open);
     OF_method_new(OF_env, dsk, "seek", &OF_blockdev_seek);
     OF_method_new(OF_env, dsk, "read", &OF_blockdev_read);
@@ -3432,7 +3636,8 @@ static void OF_vga_set_depth (OF_env_t *OF_env, OF_prop_t *prop,
 }
 
 void OF_vga_register (const unsigned char *name, unused uint32_t address,
-                      int width, int height, int depth)
+                      int width, int height, int depth,
+                      unsigned long vga_bios_addr, unsigned long vga_bios_size)
 {
     OF_env_t *OF_env;
     unsigned char tmp[OF_NAMELEN_MAX];
@@ -3504,6 +3709,18 @@ void OF_vga_register (const unsigned char *name, unused uint32_t address,
     OF_prop_string_new(OF_env, als, "display", tmp);
     OF_node_put(OF_env, als);
     /* XXX: may also need read-rectangle */
+
+    if (vga_bios_size >= 8) {
+        const uint8_t *p;
+        int size;
+        /* check the QEMU VGA BIOS header */
+        p = (const uint8_t *)vga_bios_addr;
+        if (p[0] == 'N' && p[1] == 'D' && p[2] == 'R' && p[3] == 'V') {
+            size = *(uint32_t *)(p + 4);
+            OF_property_new(OF_env, disp, "driver,AAPL,MacOS,PowerPC", 
+                            p + 8, size);
+        }
+    }
  out:
     OF_node_put(OF_env, disp);
 }
@@ -4451,7 +4668,10 @@ static void OF_interpret (OF_env_t *OF_env)
         break;
     case 0x233441d3: /* MacOS X 10.2 and OpenDarwin 1.41 */
         /* Create "memory-map" pseudo device */
-        popd(OF_env);
+        {
+            OF_node_t *map;
+            uint32_t phandle;
+
         /* Find "/packages" */
         chs = OF_pack_find_by_name(OF_env, OF_node_root, "/chosen");
         if (chs == NULL) {
@@ -4459,10 +4679,6 @@ static void OF_interpret (OF_env_t *OF_env)
             ERROR("Cannot get '/chosen'\n");
             break;
         }
-        {
-#if 1
-            OF_node_t *map;
-            uint32_t phandle;
             map = OF_node_new(OF_env, chs, "memory-map", OF_ADDRESS_NONE);
             if (map == NULL) {
                 pushd(OF_env, -1);
@@ -4473,11 +4689,8 @@ static void OF_interpret (OF_env_t *OF_env)
             OF_node_put(OF_env, map);
             OF_node_put(OF_env, chs);
             pushd(OF_env, phandle);
+        pushd(OF_env, 0);
         }
-#else
-        pushd(OF_env, 0);
-#endif
-        pushd(OF_env, 0);
         break;
     case 0x32a2d18e: /* MacOS X 10.2 and OpenDarwin 6.02 */
         /* Return screen ihandle */
@@ -4540,9 +4753,10 @@ static void OF_interpret (OF_env_t *OF_env)
     case 0x4ad41f2d:
         /* Yaboot: wait 10 ms: sure ! */
         break;
+
     default:
         /* ERROR */
-        printf("Script:\n%s\n", FString);
+        printf("Script: len=%d\n%s\n", (int)strlen(FString), FString);
         printf("Call %0x NOT IMPLEMENTED !\n", crc);
         bug();
         break;
@@ -4581,6 +4795,7 @@ static void OF_quiesce (OF_env_t *OF_env)
 {
     OF_CHECK_NBARGS(OF_env, 0);
     /* Should free all OF resources */
+    bd_reset_all();
 #if defined (DEBUG_BIOS)
     {
         uint16_t loglevel = 0x02 | 0x10 | 0x80;

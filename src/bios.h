@@ -64,6 +64,7 @@ enum {
     ARCH_CHRP,
     ARCH_MAC99,
     ARCH_POP,
+    ARCH_HEATHROW,
 };
 
 /* Hardware definition(s) */
@@ -174,6 +175,7 @@ int bd_write (bloc_device_t *bd, const void *buffer, int len);
 int bd_ioctl (bloc_device_t *bd, int func, void *args);
 uint32_t bd_seclen (bloc_device_t *bd);
 void bd_close (bloc_device_t *bd);
+void bd_reset_all(void);
 uint32_t bd_seclen (bloc_device_t *bd);
 uint32_t bd_maxbloc (bloc_device_t *bd);
 void bd_sect2CHS (bloc_device_t *bd, uint32_t secnum,
@@ -183,12 +185,12 @@ uint32_t bd_CHS2sect (bloc_device_t *bd,
 part_t *bd_probe (int boot_device);
 bloc_device_t *bd_get (int device);
 void bd_put (bloc_device_t *bd);
-void bd_set_boot_part (bloc_device_t *bd, part_t *partition);
+void bd_set_boot_part (bloc_device_t *bd, part_t *partition, int partnum);
 part_t **_bd_parts (bloc_device_t *bd);
 
 void ide_pci_pc_register (uint32_t io_base0, uint32_t io_base1,
                           uint32_t io_base2, uint32_t io_base3,
-                          void *OF_private);
+                          void *OF_private0, void *OF_private1);
 void ide_pci_pmac_register (uint32_t io_base0, uint32_t io_base1,
                             void *OF_private);
 
@@ -399,17 +401,23 @@ void *OF_register_pci_device (void *parent, pci_dev_t *dev,
                               uint16_t min_grant, uint16_t max_latency);
 void OF_finalize_pci_host (void *dev, int first_bus, int nb_busses);
 void OF_finalize_pci_device (void *dev, uint8_t bus, uint8_t devfn,
-                             uint32_t *regions, uint32_t *sizes);
+                             uint32_t *regions, uint32_t *sizes,
+                             int irq_line);
 void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
                             void *private_data);
+void OF_finalize_pci_ide (void *dev, 
+                          uint32_t io_base0, uint32_t io_base1,
+                          uint32_t io_base2, uint32_t io_base3);
 int OF_register_bus (const unsigned char *name, uint32_t address,
                      const unsigned char *type);
 int OF_register_serial (const unsigned char *bus, const unsigned char *name,
                         uint32_t io_base, int irq);
 int OF_register_stdio (const unsigned char *dev_in,
                        const unsigned char *dev_out);
-void OF_vga_register (const unsigned char *name, uint32_t address,
-                      int width, int height, int depth);
+void OF_vga_register (const unsigned char *name, unused uint32_t address,
+                      int width, int height, int depth,
+                      unsigned long vga_bios_addr, 
+                      unsigned long vga_bios_size);
 void *OF_blockdev_register (void *parent, void *private,
                             const unsigned char *type,
                             const unsigned char *name, int devnum,

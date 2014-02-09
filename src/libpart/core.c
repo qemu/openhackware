@@ -126,7 +126,7 @@ void part_set_blocsize (bloc_device_t *bd, part_t *part, uint32_t blocsize)
 }
 
 int part_register (bloc_device_t *bd, part_t *partition,
-                   const unsigned char *name)
+                   const unsigned char *name, int partnum)
 {
     part_t **cur;
 
@@ -134,6 +134,7 @@ int part_register (bloc_device_t *bd, part_t *partition,
     partition->bd = bd;
     partition->next = NULL;
     partition->name = strdup(name);
+    partition->partnum = partnum;
     for (cur = _bd_parts(bd); *cur != NULL; cur = &(*cur)->next)
         continue;
     *cur = partition;
@@ -141,29 +142,15 @@ int part_register (bloc_device_t *bd, part_t *partition,
     return 0;
 }
 
-static inline int set_boot_part (bloc_device_t *bd, int partnum)
-{
-    part_t *cur;
-
-    cur = part_get(bd, partnum);
-    if (cur == NULL)
-        return -1;
-    bd_set_boot_part(bd, cur);
-
-    return 0;
-}
-
 part_t *part_get (bloc_device_t *bd, int partnum)
 {
     part_t **listp, *cur;
-    int i;
 
     listp = _bd_parts(bd);
-    cur = *listp;
-    for (i = 0; i != partnum; i++) {
-        if (cur == NULL)
+    
+    for (cur = *listp; cur != NULL; cur = cur->next) {
+        if (cur->partnum == partnum)
             break;
-        cur = cur->next;
     }
     
     return cur;
@@ -192,17 +179,20 @@ part_t *part_get_raw (bloc_device_t *bd)
     part_set_blocsize(bd, part, 512);
     part->bd = bd;
     part->flags = PART_TYPE_RAW | PART_FLAG_BOOT;
-    part_register(bd, part, "Raw");
+    part_register(bd, part, "Raw", 0);
 
     return part;
 }
 
+bloc_device_t *part_get_bd (part_t *part)
+{
+    return part->bd;
+}
+
 part_t *part_probe (bloc_device_t *bd, int set_raw)
 {
-    part_t *part0, *boot_part, **cur;
+    part_t *part0 = NULL, *boot_part, **cur;
 
-    /* Register the 0 partition: raw partition containing the whole disk */
-    part0 = part_get_raw(bd);
     /* Try to find a valid boot partition */
     boot_part = Apple_probe_partitions(bd);
     if (boot_part == NULL) {
@@ -210,9 +200,12 @@ part_t *part_probe (bloc_device_t *bd, int set_raw)
         if (boot_part == NULL && arch == ARCH_PREP)
             boot_part = PREP_find_partition(bd);
         if (boot_part == NULL && set_raw != 0) {
-            boot_part = part0;
-            set_boot_part(bd, 0);
+            dprintf("Use bloc device as raw partition\n");
         }
+    }
+    if (_bd_parts(bd) == NULL) {
+        /* Register the 0 partition: raw partition containing the whole disk */
+        part0 = part_get_raw(bd);
     }
     /* Probe filesystem on each found partition */
     for (cur = _bd_parts(bd); *cur != NULL; cur = &(*cur)->next) {
@@ -248,23 +241,28 @@ part_t *part_probe (bloc_device_t *bd, int set_raw)
             type = "unknown";
             break;
         }
-        DPRINTF("Probe filesystem on %s %s partition '%s' %s\n",
+        dprintf("Probe filesystem on %s %s partition '%s' %s %p\n",
                 type, map, (*cur)->name,
-                ((*cur)->flags) & PART_FLAG_BOOT ? "(bootable)" : "");
+                ((*cur)->flags) & PART_FLAG_BOOT ? "(bootable)" : "", *cur);
         if (((*cur)->flags) & PART_FLAG_FS) {
             if (((*cur)->flags) & PART_FLAG_BOOT)
                 (*cur)->fs = fs_probe(*cur, 1);
             else
                 (*cur)->fs = fs_probe(*cur, 0);
+        } else if (((*cur)->flags) & PART_TYPE_RAW) {
+            (*cur)->fs = fs_probe(*cur, 2);
         } else {
             (*cur)->fs = fs_probe(*cur, 2);
         }
-        if (((*cur)->flags) & PART_FLAG_BOOT) {
-            bd_set_boot_part(bd, *cur);
             fs_get_bootfile((*cur)->fs);
+        if (((*cur)->flags) & PART_FLAG_BOOT) {
+            dprintf("Partition is bootable (%d)\n", (*cur)->partnum);
+            bd_set_boot_part(bd, *cur, (*cur)->partnum);
+            if (boot_part == NULL)
+                boot_part = *cur;
         }
     }
-    DPRINTF("Boot partition: %p %p %p %p\n", boot_part, boot_part->fs,
+    dprintf("Boot partition: %p %p %p %p\n", boot_part, boot_part->fs,
             part_fs(boot_part), part0);
 
     return boot_part;
@@ -279,6 +277,7 @@ int part_set_boot_file (part_t *part, uint32_t start, uint32_t offset,
     part->boot_size.offset = 0;
     part->boot_load = 0;
     part->boot_entry = 0;
+    part->flags |= PART_FLAG_BOOT;
 
     return 0;
 }

@@ -30,6 +30,7 @@
 
 struct part_t {
     bloc_device_t *bd;
+    int partnum;
     uint32_t start;      /* Partition first bloc             */
     uint32_t size;       /* Partition size, in blocs         */
     uint32_t spb;
@@ -54,7 +55,7 @@ struct part_t {
 };
 
 int part_register (bloc_device_t *bd, part_t *partition,
-                   const unsigned char *name);
+                   const unsigned char *name, int partnum);
 void part_set_blocsize (bloc_device_t *bd, part_t *part, uint32_t blocsize);
 void part_private_set (part_t *part, void *private);
 void *part_private_get (part_t *part);

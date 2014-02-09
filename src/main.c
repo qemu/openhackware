@@ -364,20 +364,24 @@ int main (void)
     void *load_base, *load_entry, *last_alloc, *load_end;
     uint32_t memsize, boot_image_size, cmdline_size, ramdisk_size;
     uint32_t boot_base, boot_nb;
-    int boot_device;
+    int boot_device, i;
+    static const uint32_t isa_base_tab[3] = {
+        0x80000000, /* PREP */
+        0xFE000000, /* Grackle (Heathrow) */
+        0xF2000000, /* UniNorth (Mac99)  */
+    };
 
     /* Retrieve NVRAM configuration */
- nvram_retry:
+    for(i = 0; i < 3; i++) {
+        isa_io_base = isa_base_tab[i];
     nvram = NVRAM_get_config(&memsize, &boot_device,
                              &boot_image, &boot_image_size,
                              &cmdline, &cmdline_size,
                              &ramdisk, &ramdisk_size);
-    if (nvram == NULL) {
-        /* Retry with another isa_io_base */
-        if (isa_io_base == 0x80000000) {
-            isa_io_base = 0xF2000000;
-            goto nvram_retry;
+        if (nvram)
+            break;
         }
+    if (i == 3) {
         ERROR("Unable to load configuration from NVRAM. Aborting...\n");
         return -1;
     }
@@ -402,7 +406,7 @@ int main (void)
         cpu_name = CPU_get_name(pvr);
         OF_register_cpu(cpu_name, 0, pvr,
                         200 * 1000 * 1000, 200 * 1000 * 1000,
-                        100 * 1000 * 1000, 10 * 1000 * 1000,
+                        100 * 1000 * 1000, 100 * 1000 * 1000,
                         0x0092);
     }
     OF_register_memory(memsize, 512 * 1024 /* TOFIX */);
@@ -433,9 +437,12 @@ int main (void)
     vga_puts(copyright);
     vga_puts("\n");
 
+#if 0
     /* QEMU is quite incoherent: d is cdrom, not second drive */
+    /* XXX: should probe CD-ROM position */
     if (boot_device == 'd')
         boot_device = 'e';
+#endif
     /* Open boot device */
     boot_part = bd_probe(boot_device);
     if (boot_device == 'm') {

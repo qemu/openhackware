@@ -55,6 +55,7 @@ struct bloc_device_t {
     /* Partitions */
     part_t *parts, *bparts;
     part_t *boot_part;
+    int bpartnum;
     /* Chain */
     bloc_device_t *next;
 };
@@ -66,6 +67,7 @@ static int fdc_read_sector (bloc_device_t *bd, void *buffer, int secnum);
 
 static int ide_initialize (bloc_device_t *bd, int device);
 static int ide_read_sector (bloc_device_t *bd, void *buffer, int secnum);
+static int ide_reset (bloc_device_t *bd);
 
 static int mem_initialize (bloc_device_t *bd, int device);
 static int mem_read_sector (bloc_device_t *bd, void *buffer, int secnum);
@@ -212,6 +214,17 @@ void bd_close (unused bloc_device_t *bd)
 {
 }
 
+void bd_reset_all(void)
+{
+    bloc_device_t *bd;
+    for (bd = bd_list; bd != NULL; bd = bd->next) {
+        if (bd->init == &ide_initialize) {
+            /* reset IDE drive because Darwin wants all IDE devices to be reset */
+            ide_reset(bd);
+        }
+    }
+}
+
 uint32_t bd_seclen (bloc_device_t *bd)
 {
     return bd->seclen;
@@ -223,10 +236,12 @@ uint32_t bd_maxbloc (bloc_device_t *bd)
 }
 
 /* XXX: to be suppressed */
-void bd_set_boot_part (bloc_device_t *bd, part_t *partition)
+void bd_set_boot_part (bloc_device_t *bd, part_t *partition, int partnum)
 {
+    dprintf("%s: part %p (%p) %d\n", __func__, partition, bd->boot_part, partnum);
     if (bd->boot_part == NULL) {
         bd->boot_part = partition;
+        bd->bpartnum = partnum;
     }
 }
 
@@ -238,6 +253,13 @@ part_t **_bd_parts (bloc_device_t *bd)
 part_t **_bd_bparts (bloc_device_t *bd)
 {
     return &bd->bparts;
+}
+
+void bd_set_boot_device (bloc_device_t *bd)
+{
+#if defined (USE_OPENFIRMWARE)
+    OF_blockdev_set_boot_device(bd->OF_private, bd->bpartnum, "\\\\ofwboot");
+#endif
 }
 
 part_t *bd_probe (int boot_device)
@@ -272,9 +294,7 @@ part_t *bd_probe (int boot_device)
         tmp = part_probe(bd, force_raw);
         if (boot_device == bd->device) {
             boot_part = tmp;
-#if defined (USE_OPENFIRMWARE)
-            OF_blockdev_set_boot_device(bd->OF_private, 2, "\\\\ofwboot");
-#endif
+            bd_set_boot_device(bd);
         }
     }
 
@@ -717,34 +737,29 @@ static ide_ops_t *ide_pci_ops;
 /* IDE PCI access for pc */
 static uint8_t ide_pci_port_read (bloc_device_t *bd, int port)
 {
-    eieio();
-
-    return *(uint8_t *)(bd->io_base + port);
+    uint8_t value;
+    value = inb(bd->io_base + port);
+    return value;
 }
 
 static void ide_pci_port_write (bloc_device_t *bd, int port, uint8_t value)
 {
-    *(uint8_t *)(bd->io_base + port) = value;
-    eieio();
+    outb(bd->io_base + port, value);
 }
 
 static uint32_t ide_pci_data_readl (bloc_device_t *bd)
 {
-    eieio();
-
-    return *((uint32_t *)bd->io_base);
+    return inl(bd->io_base);
 }
 
 static void ide_pci_data_writel (bloc_device_t *bd, uint32_t val)
 {
-    *(uint32_t *)(bd->io_base) = val;
-    eieio();
+    outl(bd->io_base, val);
 }
 
 static void ide_pci_control_write (bloc_device_t *bd, uint32_t val)
 {
-    *((uint8_t *)bd->tmp) = val;
-    eieio();
+    outb(bd->tmp + 2, val);
 }
 
 static ide_ops_t ide_pci_pc_ops = {
@@ -761,7 +776,7 @@ static ide_ops_t ide_pci_pc_ops = {
 
 void ide_pci_pc_register (uint32_t io_base0, uint32_t io_base1,
                           uint32_t io_base2, uint32_t io_base3,
-                          unused void *OF_private)
+                          void *OF_private0, void *OF_private1)
 {
     if (ide_pci_ops == NULL) {
         ide_pci_ops = malloc(sizeof(ide_ops_t));
@@ -770,19 +785,19 @@ void ide_pci_pc_register (uint32_t io_base0, uint32_t io_base1,
         memcpy(ide_pci_ops, &ide_pci_pc_ops, sizeof(ide_ops_t));
     }
     if ((io_base0 != 0 || io_base1 != 0) &&
-        ide_pci_ops->base[0] == 0 && ide_pci_ops->base[1] == 0) {
+        ide_pci_ops->base[0] == 0 && ide_pci_ops->base[2] == 0) {
         ide_pci_ops->base[0] = io_base0;
-        ide_pci_ops->base[1] = io_base1;
+        ide_pci_ops->base[2] = io_base1;
 #ifdef USE_OPENFIRMWARE
-        ide_pci_ops->OF_private[0] = OF_private;
+        ide_pci_ops->OF_private[0] = OF_private0;
 #endif
     }
     if ((io_base2 != 0 || io_base3 != 0) &&
-        ide_pci_ops->base[2] == 0 && ide_pci_ops->base[3] == 0) {
-        ide_pci_ops->base[2] = io_base2;
+        ide_pci_ops->base[1] == 0 && ide_pci_ops->base[3] == 0) {
+        ide_pci_ops->base[1] = io_base2;
         ide_pci_ops->base[3] = io_base3;
 #ifdef USE_OPENFIRMWARE
-        ide_pci_ops->OF_private[1] = OF_private;
+        ide_pci_ops->OF_private[1] = OF_private1;
 #endif
     }
 }
@@ -935,6 +950,8 @@ static int ide_reset (bloc_device_t *bd)
 }
 
 static void atapi_pad_req (void *buffer, int len);
+static void atapi_make_req (bloc_device_t *bd, uint32_t *buffer,
+                            int maxlen);
 static int atapi_read_sector (bloc_device_t *bd, void *buffer, int secnum);
 
 static int ide_initialize (bloc_device_t *bd, int device)
@@ -1035,9 +1052,7 @@ static int ide_initialize (bloc_device_t *bd, int device)
         DPRINTF("INQUIRY\n");
         len = spc_inquiry_req(&atapi_buffer, 36);
         atapi_pad_req(&atapi_buffer, len);
-        ide_port_write(bd, 0x07, 0xA0);
-        for (i = 0; i < 3; i++)
-            ide_data_writel(bd, ldswap32(&atapi_buffer[i]));
+        atapi_make_req(bd, atapi_buffer, 36);
         status = ide_port_read(bd, 0x07);
         if (status != 0x48) {
             ERROR("ATAPI INQUIRY : status %0x != 0x48\n", status);
@@ -1053,9 +1068,7 @@ static int ide_initialize (bloc_device_t *bd, int device)
         DPRINTF("READ_CAPACITY\n");
         len = mmc_read_capacity_req(&atapi_buffer);
         atapi_pad_req(&atapi_buffer, len);
-        ide_port_write(bd, 0x07, 0xA0);
-        for (i = 0; i < 3; i++)
-            ide_data_writel(bd, ldswap32(&atapi_buffer[i]));
+        atapi_make_req(bd, atapi_buffer, 8);
         status = ide_port_read(bd, 0x07);
         if (status != 0x48) {
             ERROR("ATAPI READ_CAPACITY : status %0x != 0x48\n", status);
@@ -1105,6 +1118,22 @@ static void atapi_pad_req (void *buffer, int len)
     memset(p + len, 0, 12 - len);
 }
 
+static void atapi_make_req (bloc_device_t *bd, uint32_t *buffer,
+                            int maxlen)
+{
+    int i;
+    /* select drive */
+    if (bd->drv == 0)
+        ide_port_write(bd, 0x06, 0x40);
+    else
+        ide_port_write(bd, 0x06, 0x50);
+    ide_port_write(bd, 0x04, maxlen & 0xff);
+    ide_port_write(bd, 0x05, (maxlen >> 8) & 0xff);
+    ide_port_write(bd, 0x07, 0xA0);
+    for (i = 0; i < 3; i++)
+        ide_data_writel(bd, ldswap32(&buffer[i]));
+}
+
 static int atapi_read_sector (bloc_device_t *bd, void *buffer, int secnum)
 {
     uint32_t atapi_buffer[4];
@@ -1112,16 +1141,9 @@ static int atapi_read_sector (bloc_device_t *bd, void *buffer, int secnum)
     uint32_t status, value;
     int i, len;
 
-    /* select drive */
-    if (bd->drv == 0)
-        ide_port_write(bd, 0x06, 0x40);
-    else
-        ide_port_write(bd, 0x06, 0x50);
     len = mmc_read12_req(atapi_buffer, secnum, 1);
     atapi_pad_req(&atapi_buffer, len);
-    ide_port_write(bd, 0x07, 0xA0);
-    for (i = 0; i < 3; i++)
-        ide_data_writel(bd, ldswap32(&atapi_buffer[i]));
+    atapi_make_req(bd, atapi_buffer, bd->seclen);
     status = ide_port_read(bd, 0x07);
     if (status != 0x48) {
         ERROR("ATAPI READ12 : status %0x != 0x48\n", status);

@@ -164,7 +164,7 @@ part_t *PREP_find_partition (bloc_device_t *bd)
             part->boot_load = 0;
             part->boot_entry = boot_offset - part->bloc_size;
             part->flags = PART_TYPE_PREP | PART_FLAG_BOOT;
-            part_register(bd, part, "PREP boot");
+            part_register(bd, part, "PREP boot", i);
             fs_raw_set_bootfile(part, part->boot_start.bloc,
                                 part->boot_start.offset,
                                 part->boot_size.bloc,

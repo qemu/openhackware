@@ -199,14 +199,18 @@ part_t *Apple_probe_partitions (bloc_device_t *bd)
         if (len == 0) {
             /* Place holder. Skip it */
             DPRINTF("%s placeholder part\t%d\n", __func__, i);
+            part->flags = PART_TYPE_APPLE | PART_FLAG_DUMMY;
+            part_register(bd, part, name, i);
         } else if (strncmp("Apple_Void", type, 32) == 0) {
             /* Void partition. Skip it */
             DPRINTF("%s Void part\t%d [%s]\n", __func__, i, type);
+            part->flags = PART_TYPE_APPLE | PART_FLAG_DUMMY;
+            part_register(bd, part, name, i);
         } else if (strncmp("Apple_Free", type, 32) == 0) {
             /* Free space. Skip it */
             DPRINTF("%s Free part (%d)\n", __func__, i);
             part->flags = PART_TYPE_APPLE | PART_FLAG_DUMMY;
-            part_register(bd, part, name);
+            part_register(bd, part, name, i);
         } else if (strncmp("Apple_partition_map", type, 32) == 0 ||
                    strncmp("Apple_Partition_Map", type, 32) == 0
 #if 0 // Is this really used or is it just a mistake ?
@@ -226,7 +230,7 @@ part_t *Apple_probe_partitions (bloc_device_t *bd)
                  */
             }
             part->flags = PART_TYPE_APPLE | PART_FLAG_DUMMY;
-            part_register(bd, part, name);
+            part_register(bd, part, name, i);
         } else if (strncmp("Apple_Driver", type, 32) == 0 ||
                    strncmp("Apple_Driver43", type, 32) == 0 ||
                    strncmp("Apple_Driver43_CD", type, 32) == 0 ||
@@ -236,8 +240,12 @@ part_t *Apple_probe_partitions (bloc_device_t *bd)
                    strncmp("Apple_Driver_IOKit", type, 32) == 0) {
             /* Drivers. don't care for now */
             DPRINTF("%s Drivers part\t%d [%s]\n", __func__, i, type);
+            part->flags = PART_TYPE_APPLE | PART_FLAG_DRIVER;
+            part_register(bd, part, name, i);
         } else if (strncmp("Apple_Patches", type, 32) == 0) {
             /* Patches: don't care for now */
+            part->flags = PART_TYPE_APPLE | PART_FLAG_PATCH;
+            part_register(bd, part, name, i);
             DPRINTF("%s Patches part\t%d [%s]\n", __func__, i, type);
         } else if (strncmp("Apple_HFS", type, 32) == 0 ||
                    strncmp("Apple_MFS", type, 32) == 0 ||
@@ -256,9 +264,8 @@ part_t *Apple_probe_partitions (bloc_device_t *bd)
             count = partmap->bloc_cnt * HFS_BLOCSIZE;
             if (partmap->boot_size == 0 || partmap->boot_load == 0) {
                 printf("Not a bootable partition %d %d (%p %p)\n",
-                       partmap->boot_size, partmap->boot_load,boot_part, part);
-                if (boot_part == NULL)
-                    boot_part = part;
+                       partmap->boot_size, partmap->boot_load,
+                       boot_part, part);
                 part->flags = PART_TYPE_APPLE | PART_FLAG_FS;
             } else {
                 part->boot_start.bloc = partmap->boot_start;
@@ -278,8 +285,8 @@ part_t *Apple_probe_partitions (bloc_device_t *bd)
                 boot_part = part;
                 part->flags = PART_TYPE_APPLE | PART_FLAG_FS | PART_FLAG_BOOT;
             }
-            printf("Partition: %d %s st %0x size %0x",
-                    i, name, partmap->start_bloc, partmap->bloc_cnt);
+            printf("Partition: %d '%s' '%s' st %0x size %0x",
+                    i, name, type, partmap->start_bloc, partmap->bloc_cnt);
 #ifndef DEBUG
             printf("\n");
 #endif
@@ -290,11 +297,13 @@ part_t *Apple_probe_partitions (bloc_device_t *bd)
                     part->boot_load, part->boot_entry);
             DPRINTF("                           load %0x entry %0x %0x\n",
                     partmap->boot_load2, partmap->boot_entry2, HFS_BLOCSIZE);
-            part_register(bd, part, name);
+            part_register(bd, part, name, i);
         } else {
             memcpy(tmp, type, 32);
             tmp[32] = '\0';
             ERROR("Unknown partition type [%s]\n", tmp);
+            part->flags = PART_TYPE_APPLE | PART_FLAG_DUMMY;
+            part_register(bd, part, name, i);
         }
     }
  error:

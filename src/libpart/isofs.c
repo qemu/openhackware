@@ -242,7 +242,7 @@ part_t *isofs_probe_partitions (bloc_device_t *bd)
                    part->boot_start.bloc, part->boot_size.bloc,
                    part->boot_load, part->boot_entry);
             part->flags = PART_TYPE_ISO9660 | PART_FLAG_BOOT;
-            part_register(bd, part, name);
+            part_register(bd, part, name, i + 1);
             fs_raw_set_bootfile(part, part->boot_start.bloc,
                                 part->boot_start.offset,
                                 part->boot_size.bloc,
