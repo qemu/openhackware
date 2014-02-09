@@ -2457,7 +2457,7 @@ void OF_finalize_pci_macio (void *dev, uint32_t base_address, uint32_t size,
         OF_node_put(OF_env, mpic);
     }
 #if 1
-    /* escc is usefull to get MacOS X debug messages */
+    /* escc is useful to get MacOS X debug messages */
     {
         OF_regprop_t regs[8];
         uint32_t irqs[6];
