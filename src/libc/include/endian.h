@@ -90,7 +90,7 @@ static inline void generic_cpu_swap64p_32 (uint64_t *outp, uint64_t in)
 #define __CPU_ENDIAN_4321__
 #define __CPU_LENGTH_64__
 
-#elif defined (__powerpc__)
+#elif defined (__powerpc__) || defined (_ARCH_PPC)
 
 #define __CPU_ENDIAN_1234__
 #define __CPU_LENGTH_32__

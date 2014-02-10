@@ -176,7 +176,7 @@ part_t *isofs_probe_partitions (bloc_device_t *bd)
                 ERROR("ISO catalog not for x86: %d\n", valid->arch);
                 continue;
             }
-#elif defined (__powerpc__)
+#elif defined (__powerpc__) || defined (_ARCH_PPC)
             if (valid->arch != ISOBOOT_PPC && valid->arch != ISOBOOT_MAC) {
                 ERROR("ISO catalog not for PPC: %d\n", valid->arch);
                 continue;

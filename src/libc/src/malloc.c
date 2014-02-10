@@ -45,7 +45,7 @@ void page_put (void *addr, int nb_pages);
 #define NATURAL_ALIGN_BITS 2
 #define PAGE_BITS 12
 #define __32_BITS 1
-#elif defined (__powerpc__)
+#elif defined (__powerpc__) || defined (_ARCH_PPC)
 #define NATURAL_ALIGN_BITS 2
 #define PAGE_BITS 12
 #define __32_BITS 1

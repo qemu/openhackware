@@ -44,7 +44,7 @@ typedef signed int int32_t;
 typedef unsigned long uint64_t;
 typedef signed long int64_t;
 
-#elif defined (__powerpc__)
+#elif defined (__powerpc__) || defined (_ARCH_PPC)
 
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
@@ -55,7 +55,7 @@ typedef signed int int32_t;
 typedef unsigned long long uint64_t;
 typedef signed long long int64_t;
 
-#elif defined (__powerpc64__)
+#elif defined (__powerpc64__) || defined (_ARCH_PPC64)
 
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
