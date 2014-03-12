@@ -30,7 +30,7 @@ SECTIONS
 {
         .start    : { *(.start)   } > start
         . = ALIGN(4) ;
-        .text     : { *(.text)    } > bios
+        .text     : { *(.text*)   } > bios
         . = ALIGN(4) ;
         .OpenFirmware : { *(.OpenFirmware) } > bios
         . = ALIGN(4) ;
