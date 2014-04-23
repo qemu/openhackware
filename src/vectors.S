@@ -121,7 +121,9 @@ excp_##entry##:                                           ; \
 
         /* Exception vectors */
         /* Reset exception */
-        EXCP_BUG(0100)                                    ;
+.org 0x0100
+excp_0100:
+        ba 0xfffffffc
 
         /* Machine check exception */
         EXCP_BUG(0200)                                    ;
