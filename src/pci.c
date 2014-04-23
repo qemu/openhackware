@@ -1723,8 +1723,13 @@ static inline void pci_update_device (pci_bridge_t *bridge,
                 addr = 0x30; /* PCI ROM */
             else
                 addr = 0x10 + (i * sizeof(uint32_t));
+            if (device->regions[i] & 0x00000001) {
             pci_config_writel(bridge, device->bus, device->devfn,
-                              addr, device->regions[i]);
+                              addr, device->regions[i] - 0x80000000);
+            } else {
+            pci_config_writel(bridge, device->bus, device->devfn,
+                              addr, device->regions[i] - 0xc0000000);
+            }
         }
     }
 }
